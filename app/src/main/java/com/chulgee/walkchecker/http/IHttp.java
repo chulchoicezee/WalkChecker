@@ -3,7 +3,7 @@ package com.chulgee.walkchecker.http;
 import android.os.Bundle;
 
 /**
- * Created by chulchoice on 2016-05-21.
+ * Created by chulchoice on 2016-09-23.
  */
 public interface IHttp {
 

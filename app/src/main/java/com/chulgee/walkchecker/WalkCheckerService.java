@@ -65,21 +65,30 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     private static String ADDR;
     private static String DATE;
 
+    // getter / setter
     public static long getCount() {
         return COUNT;
     }
-
     public static String getADDR() {
         return ADDR;
     }
-
-    public static String getDATE() {
-        return DATE;
+    public static String getDATE() { return DATE; }
+    public static void setDATE(String date) { DATE = date; }
+    public void setCount(long count){
+        SharedPreferences pref = getSharedPreferences("myPref", MODE_PRIVATE);
+        SharedPreferences.Editor edit = pref.edit();
+        edit.putLong("count", count);
+        edit.commit();
+        COUNT = count;
+    }
+    public void setRunning(boolean run){
+        SharedPreferences pref = getSharedPreferences("myPref", MODE_PRIVATE);
+        SharedPreferences.Editor edit = pref.edit();
+        edit.putBoolean("Running", run);
+        edit.commit();
+        mRunning = run;
     }
 
-    public static void setDATE(String date) {
-        DATE = date;
-    }
     // sensor vars
     private long lastTime;
     private float speed;
@@ -126,7 +135,8 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     @Override
     public void onLowMemory() {
         super.onLowMemory();
-        saveCurrentData();
+        setCount(COUNT);
+        setRunning(mRunning);
         Log.v(TAG, "onLowMemory mRunning=" + mRunning + ", COUNT=" + COUNT);
     }
 
@@ -145,7 +155,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         // this is the case system kills me for some reason. so, restore previous data
         if (intent == null) {
             Log.v(TAG, "COUNT=" + COUNT);
-            restorePreviousData();
+            restoreData();
             Toast.makeText(this, "restored!", Toast.LENGTH_SHORT).show();
         }
 
@@ -187,6 +197,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 if (speed > SHAKE_THRESHOLD) {
                     Intent i = new Intent(Const.ACTION_COUNT_NOTIFY);
                     COUNT++;
+                    setCount(COUNT);
                     mVibe.vibrate(100);
                     Log.v(TAG, "onSensorChanged got a step! count=" + COUNT + ", mDisplayState=" + mDisplayState);
 
@@ -216,10 +227,11 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     public void onDestroy() {
         super.onDestroy();
         Log.v(TAG, "onDestroy mSensor=" + mSensor);
-        if (mRunning) {
-            saveCurrentData();
-            Log.v(TAG, "onDestroy mRunning=" + mRunning + ", COUNT=" + COUNT);
-        }
+
+        setCount(COUNT);
+        setRunning(mRunning);
+        Log.v(TAG, "onDestroy mRunning=" + mRunning + ", COUNT=" + COUNT);
+
         // release listener and receiver
         if (mSensor != null)
             mSensor.unregisterListener(this);
@@ -265,7 +277,10 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         @Override
         public void onLocationChanged(Location loc) {
             Log.v(TAG, "Location changed : Lat" + loc.getLatitude() + "Lng: " + loc.getLongitude());
-            // revert lat/lng to address through http
+            /**
+             * revert lat/lng to address through http
+             * this performs Asynchronously with AsyncTask
+             */
             executeHttp(loc.getLatitude() + "", loc.getLongitude() + "");
         }
 
@@ -297,10 +312,12 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 if (mDisplayState == 2) {
                     wm.removeView(mView);
                 }
-                // restore previous data if killed by system
-                // restorePreviousData(); //Log.v(TAG, "mRunning=" + mRunning + ", COUNT=" + COUNT);
                 // init display for activity
                 initActivityDisplay();
+                if(mRunning){
+                    startListeningAccelerometer();
+                    startListeningGps();
+                }
                 mDisplayState = 1;
             } else if (action.equals(Const.ACTION_ACTIVITY_ONSTOP)) { // activity stopped
                 if (mRunning) {
@@ -311,15 +328,20 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                     mDisplayState = 0;
             } else if (action.equals(Const.ACTION_WALKING_START)) { // walking started
                 // set current date
-                setCurrentDate();
+                Date today = new Date();
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+                String date = sdf.format(today);
+                setDATE(date);
                 // start listening from accelerometer
                 startListeningAccelerometer();
                 // start listening from gps
                 startListeningGps();
+                setRunning(true);
                 mDisplayState = 1;// for the first time, it means no service started yet
             } else if (action.equals(Const.ACTION_WALKING_STOP)) { // walking stopped
                 // stop listening all sensors
                 stopListeningAll();
+                setRunning(false);
             }
         }
     }
@@ -395,26 +417,11 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         httpEngine.execute(url);
     }
 
-    private void restorePreviousData() {
-        SharedPreferences prefdefault = PreferenceManager.getDefaultSharedPreferences(WalkCheckerService.this);
-        mRunning = prefdefault.getBoolean("Running", false);
+    private void restoreData() {
+        SharedPreferences pref = getSharedPreferences("myPref", MODE_PRIVATE);
+        mRunning = pref.getBoolean("Running", false);
+        COUNT = pref.getLong("count", 0);
         Log.v(TAG, "restorePreviousData mRunning=" + mRunning + ", COUNT=" + COUNT);
-        if (mRunning) {
-            COUNT = prefdefault.getInt("count", 0);
-            Log.v(TAG, "restorePreviousData COUNT=" + COUNT);
-            SharedPreferences pref = getSharedPreferences("myPref", 0);
-            SharedPreferences.Editor edit = pref.edit();
-            edit.putBoolean("Running", false);
-            edit.commit();
-        }
-    }
-
-    private void saveCurrentData() {
-        SharedPreferences pref = getSharedPreferences("myPref", 0);
-        SharedPreferences.Editor edit = pref.edit();
-        edit.putLong("count", COUNT);
-        edit.putBoolean("Running", mRunning);
-        edit.commit();
     }
 
     public void registerBroadcastReceivers() {
@@ -463,18 +470,9 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         wm.addView(mView, mParams);
     }
 
-    private void setCurrentDate() {
-        Date today = new Date();
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
-        String date = sdf.format(today);
-        Log.v(TAG, "date=" + date);
-        DATE = date;
-    }
-
     private void startListeningAccelerometer() {
         if (mAccelerometer != null) {
             mSensor.registerListener(WalkCheckerService.this, mAccelerometer, SensorManager.SENSOR_DELAY_GAME);
-            mRunning = true;
         }
     }
 
@@ -498,7 +496,6 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         if (mSensor != null) {
             Log.v(TAG, "sensor unregi..");
             mSensor.unregisterListener(WalkCheckerService.this);
-            mRunning = false;
         }
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(WalkCheckerService.this, "gps permission is not acquired", Toast.LENGTH_SHORT).show();

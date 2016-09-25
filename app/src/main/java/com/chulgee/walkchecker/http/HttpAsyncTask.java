@@ -19,7 +19,7 @@ import java.net.URL;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Created by chulchoice on 2016-05-21.
+ * Created by chulchoice on 2016-09-24.
  */
 public class HttpAsyncTask extends AsyncTask<String, Void, String> implements IHttp {
 

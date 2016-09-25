@@ -6,7 +6,7 @@ import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 
 /**
- * Created by chulchoice on 2016-05-21.
+ * Created by chulchoice on 2016-09-23.
  */
 public abstract class AbstractCurAdapter extends BaseAdapter{
 
