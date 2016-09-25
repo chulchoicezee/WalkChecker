@@ -37,28 +37,34 @@ import com.chulgee.walkchecker.util.Const;
 public class WalkCheckerActivity extends Activity implements View.OnClickListener {
 
     private static final String TAG = "WalkCheckerActivity";
+    // view vars
     private ViewPager mPager;
     private Button btn_one;
     private Button btn_two;
-    private LocalBroadcastReceiver mLocalReceiver = new LocalBroadcastReceiver();
+    // walking stared or not
     private boolean mRunning;
+    // permission for overlay
     private boolean canOverlay;
+    // local br and listener
+    private LocalBroadcastReceiver mLocalReceiver = new LocalBroadcastReceiver();
     private LocationManager mLocationManager = null;
-    private LocationListener mLocationListener = null;
 
+    /**
+     * handle some display-related tasks
+     */
     private Handler mHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
             Bundle b = msg.getData();
             Log.v(TAG, "bundle=" + b);
             switch (msg.what) {
-                case 0:
+                case Const.PARAM_ACT_UPDATE_ALL:
                     updateAll(b);
                     break;
-                case 1:
+                case Const.PARAM_ACT_UPDATE_COUNT_DISTANCE:
                     updateCountandDistance(b);
                     break;
-                case 2:
+                case Const.PARAM_ACT_UPDATE_LOCATION:
                     updateLocation(b);
                     break;
                 default:
@@ -67,33 +73,291 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
         }
     };
 
-    private void updateAll(Bundle b){
-        String count = b.getString("count");
-        String addr = b.getString("addr");
-        String distance = b.getString("distance");
-        if (mPager != null)
-            ((MyAdapter) (mPager.getAdapter())).initDisplay(count, addr, distance);
-    }
-
-    private void updateCountandDistance(Bundle b){
-        String count = b.getString("count");
-        String distance = b.getString("distance");
-        if (mPager != null) {
-            ((MyAdapter) (mPager.getAdapter())).setCount(count);
-            ((MyAdapter) (mPager.getAdapter())).setDistance(distance);
-        }
-    }
-
-    private void updateLocation(Bundle b){
-        String addr = b.getString("addr");
-        if (mPager != null)
-            ((MyAdapter) (mPager.getAdapter())).setAddr(addr);
-    }
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // init views and adapter
+        initViews();
+
+        // register local broadcast
+        registerLocalBr();
+
+        // check permission
+        checkPermissionForGps();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        switch(requestCode){
+            case 1:
+                if(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
+                    Toast.makeText(WalkCheckerActivity.this, "GPS available", Toast.LENGTH_SHORT).show();
+                }else{
+                    Toast.makeText(WalkCheckerActivity.this, "Please turn on GPS next time", Toast.LENGTH_SHORT).show();
+                    finish();
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        Log.v(TAG, "requestCode="+requestCode+", resultCode="+resultCode);
+        if(requestCode == 1){
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    && Settings.canDrawOverlays(this)) {
+                canOverlay = true;
+                Toast.makeText(this, "Overlay available", Toast.LENGTH_SHORT).show();
+                Intent i = new Intent(WalkCheckerActivity.this, WalkCheckerService.class);
+                startService(i);
+            } else {
+                Toast.makeText(this, "Overlay not available", Toast.LENGTH_SHORT).show();
+                finish();
+            }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if(canOverlayWindow(this)) {
+            Intent i = new Intent(Const.ACTION_ACTIVITY_ONRESUME);
+            LocalBroadcastManager.getInstance(this).sendBroadcast(i);
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        Intent i = new Intent(Const.ACTION_ACTIVITY_ONSTOP);
+        LocalBroadcastManager.getInstance(this).sendBroadcast(i);
+    }
+
+    @Override
+    public void onClick(View v) {
+        switch(v.getId()){
+            case R.id.btn_one:
+                mPager.setCurrentItem(0);
+                break;
+            case R.id.btn_two:
+                mPager.setCurrentItem(1);
+                break;
+            default:
+                break;
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalReceiver);
+    }
+
+    /**
+     * view pager adapter
+     */
+    class MyAdapter extends PagerAdapter{
+        LayoutInflater inflater;
+        // for view cache
+        View pane1 = null;
+        View pane2 = null;
+
+        public MyAdapter(Context c){
+            super();
+            inflater = LayoutInflater.from(c);
+        }
+
+        @Override
+        public int getCount() {
+            return 2;
+        }
+
+        @Override
+        public Object instantiateItem(ViewGroup container, int position) {
+            View v = null;
+            ViewCache vc = new ViewCache();
+
+            if(position == 0){
+                if(pane1 == null){
+                    v = inflater.inflate(R.layout.inflate_one, null);
+                    vc.count = (TextView)v.findViewById(R.id.tv_count);
+                    vc.distance = (TextView)v.findViewById(R.id.tv_distance);
+                    vc.location = (TextView)v.findViewById(R.id.tv_location);
+                    vc.btn_start = (Button)v.findViewById(R.id.btn_start);
+                    vc.btn_start.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            Button btn = (Button)v;
+                            String action;
+                            if(mRunning){
+                                action = Const.ACTION_WALKING_STOP;
+                                mRunning = false;
+                            }else{
+                                action = Const.ACTION_WALKING_START;
+                                mRunning = true;
+                            }
+                            btn.setText(mRunning?"STOP":"START");
+                            // deliver start or stop to service
+                            Intent i = new Intent(action);
+                            LocalBroadcastManager.getInstance(WalkCheckerActivity.this).sendBroadcast(i);
+                        }
+                    });
+                    v.setTag(vc);
+                    pane1 = v;
+                }else // view cache exists so use it.
+                    v = pane1;
+            }else if(position == 1){
+                if(pane2 == null){
+                    v = inflater.inflate(R.layout.inflate_two, null);
+                    vc.lv = (ListView)v.findViewById(R.id.list);
+                    String[] from = new String[]{WalkCheckerProvider.DbHelper.COLUMN_DATE, WalkCheckerProvider.DbHelper.COLUMN_COUNT};
+                    Cursor c = getContentResolver().query(Uri.parse(Const.CONTENT_URI), from, null, null, null);
+                    try{
+                        if(c != null && c.moveToFirst()){
+                            int[] to = new int[]{R.id.list_item_tv1,R.id.list_item_tv2};
+                            ListAdapterAbstract listAdapter = new ListAdapterAbstract(c);
+                            vc.lv.setAdapter(listAdapter);
+                        }
+                    }catch (Exception e){e.printStackTrace();}
+                    pane2 = v;
+                }else // view cache exists so use it.
+                    v = pane2;
+            }
+
+            mPager.addView(v,0);
+            return v;
+        }
+
+        @Override
+        public void destroyItem(ViewGroup container, int position, Object object) {
+            mPager.removeView((View)object);
+        }
+
+        @Override
+        public boolean isViewFromObject(View view, Object object) {
+            return view == object;
+        }
+
+        public void setCount(String str){
+            ViewCache vc = (ViewCache)pane1.getTag();
+            vc.count.setText(str);
+        }
+
+        public void setDistance(String str){
+            ViewCache vc = (ViewCache)pane1.getTag();
+            vc.distance.setText(str);
+        }
+
+        public void setAddr(String str){
+            ViewCache vc = (ViewCache)pane1.getTag();
+            if(str == null || str.isEmpty()) str = "??? ??? ????.";
+            vc.location.setText(str);
+        }
+
+        public void initDisplay(String count, String addr, String distance){
+            ViewCache vc = (ViewCache)pane1.getTag();
+            String str = null;
+            if(mRunning)
+                str = "STOP";
+            else
+                str = "START";
+            vc.btn_start.setText(str);
+            vc.count.setText(count);
+            vc.location.setText(addr);
+            vc.distance.setText(distance);
+        }
+
+        private class ViewCache{
+            TextView count;
+            TextView distance;
+            TextView location;
+            TextView date;
+            Button btn_start;
+            ListView lv;
+        }
+
+        /**
+         * implemented my own AbstractCurAdapter for easy use
+         * cursor adapter class for history
+         */
+        public class ListAdapterAbstract extends AbstractCurAdapter {
+
+            public ListAdapterAbstract(Cursor $c){
+                super($c);
+            }
+
+            // called just one time, applied cache mechanism
+            @Override
+            public View getRowView() {
+                View v = getLayoutInflater().inflate(R.layout.list_item, null);
+                ViewCache vc = new ViewCache();
+                vc.date = (TextView)v.findViewById(R.id.list_item_tv1);
+                vc.count = (TextView)v.findViewById(R.id.list_item_tv2);
+                v.setTag(vc);
+                return v;
+            }
+
+            @Override
+            public void setRow(final Cursor c, int idx, View v, ViewGroup viewGroup) {
+                ViewCache vc = (ViewCache) v.getTag();
+                vc.date.setText(c.getString(c.getColumnIndex(WalkCheckerProvider.DbHelper.COLUMN_DATE)));
+                vc.count.setText(c.getString(c.getColumnIndex(WalkCheckerProvider.DbHelper.COLUMN_COUNT)));
+            }
+        }
+    }
+
+    /**
+     * local br receiver for communication between activity and service
+     */
+    private class LocalBroadcastReceiver extends BroadcastReceiver{
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            Log.v(TAG, "action="+action);
+
+            Message message = new Message();
+            Bundle bd = new Bundle();
+            String count = null;
+            String addr = null;
+            String distance = null;
+
+            if(action.equals(Const.ACTION_INIT_ACTIVITY)){
+                // update all views in activity
+                message.what = Const.PARAM_ACT_UPDATE_ALL;
+                mRunning = intent.getBooleanExtra("Running", false);
+                count = intent.getStringExtra("count");
+                bd.putString("count", count);
+                addr = intent.getStringExtra("addr");
+                bd.putString("addr", addr);
+                distance = intent.getStringExtra("distance");
+                bd.putString("distance", Long.valueOf(count)*58/100+""+"m");
+            }else if(action.equals(Const.ACTION_COUNT_NOTIFY)){
+                // update count and distance
+                message.what = Const.PARAM_ACT_UPDATE_COUNT_DISTANCE;
+                count = intent.getStringExtra("count");
+                bd.putString("count", count);
+                distance = intent.getStringExtra("distance");
+                bd.putString("distance", Long.valueOf(count)*58/100+""+"m");
+            }else if(action.equals(Const.ACTION_ADDR_NOTIFY)){
+                // update location
+                message.what = Const.PARAM_ACT_UPDATE_LOCATION;
+                addr = intent.getStringExtra("addr");
+                bd.putString("addr", addr);
+            }
+            message.setData(bd);
+            mHandler.sendMessage(message);
+        }
+    }
+
+    /***************************************** local apis ****************************************/
+
+    private void initViews(){
         btn_one = (Button) findViewById(R.id.btn_one);
         btn_two = (Button) findViewById(R.id.btn_two);
         btn_one.setOnClickListener(this);
@@ -102,14 +366,33 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
         //bind adapter
         mPager = (ViewPager) findViewById(R.id.pager);
         mPager.setAdapter(new MyAdapter(getApplicationContext()));
+    }
 
-        //regi br
+    private void registerLocalBr(){
         IntentFilter filter = new IntentFilter();
         filter.addAction(Const.ACTION_COUNT_NOTIFY);
         filter.addAction(Const.ACTION_ADDR_NOTIFY);
         filter.addAction(Const.ACTION_INIT_ACTIVITY);
         LocalBroadcastManager.getInstance(this).registerReceiver(mLocalReceiver, filter);
+    }
 
+    public boolean canOverlayWindow(Context context) {
+        boolean ret = false;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && !Settings.canDrawOverlays(context)) {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+            startActivityForResult(intent, 1);
+        } else {
+            //start service
+            Intent i = new Intent(WalkCheckerActivity.this, WalkCheckerService.class);
+            startService(i);
+            canOverlay = ret = true;
+        }
+        return ret;
+    }
+
+    private void checkPermissionForGps(){
         mLocationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 
         boolean isGPSEnabled = mLocationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
@@ -144,266 +427,27 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
         }
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        switch(requestCode){
-            case 1:
-                if(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
-                    Toast.makeText(WalkCheckerActivity.this, "GPS available", Toast.LENGTH_SHORT).show();
-                }else{
-                    Toast.makeText(WalkCheckerActivity.this, "Please turn on GPS next time", Toast.LENGTH_SHORT).show();
-                    finish();
-                }
+    private void updateAll(Bundle b){
+        String count = b.getString("count");
+        String addr = b.getString("addr");
+        String distance = b.getString("distance");
+        if (mPager != null)
+            ((MyAdapter) (mPager.getAdapter())).initDisplay(count, addr, distance);
+    }
+
+    private void updateCountandDistance(Bundle b){
+        String count = b.getString("count");
+        String distance = b.getString("distance");
+        if (mPager != null) {
+            ((MyAdapter) (mPager.getAdapter())).setCount(count);
+            ((MyAdapter) (mPager.getAdapter())).setDistance(distance);
         }
     }
 
-    public void startOverlayWindowService(Context context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                && !Settings.canDrawOverlays(context)) {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            startActivityForResult(intent, 1);
-
-        } else {
-            canOverlay = true;
-            //start service
-            Intent i = new Intent(WalkCheckerActivity.this, WalkCheckerService.class);
-            startService(i);
-        }
+    private void updateLocation(Bundle b){
+        String addr = b.getString("addr");
+        if (mPager != null)
+            ((MyAdapter) (mPager.getAdapter())).setAddr(addr);
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        Log.v(TAG, "requestCode="+requestCode+", resultCode="+resultCode);
-        if(requestCode == 1){
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                    && Settings.canDrawOverlays(this)) {
-                canOverlay = true;
-                Toast.makeText(this, "Overlay available", Toast.LENGTH_SHORT).show();
-                Intent i = new Intent(WalkCheckerActivity.this, WalkCheckerService.class);
-                startService(i);
-            } else {
-                Toast.makeText(this, "Overlay not available", Toast.LENGTH_SHORT).show();
-                finish();
-            }
-        }
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        startOverlayWindowService(this);
-        if(canOverlay) {
-            Intent i = new Intent(Const.ACTION_ACTIVITY_ONRESUME);
-            LocalBroadcastManager.getInstance(this).sendBroadcast(i);
-        }
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        Intent i = new Intent(Const.ACTION_ACTIVITY_ONSTOP);
-        LocalBroadcastManager.getInstance(this).sendBroadcast(i);
-    }
-
-    @Override
-    public void onClick(View v) {
-        switch(v.getId()){
-            case R.id.btn_one:
-                mPager.setCurrentItem(0);
-                break;
-            case R.id.btn_two:
-                mPager.setCurrentItem(1);
-                break;
-            default:
-                break;
-        }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalReceiver);
-    }
-
-    private View.OnClickListener mPaneListener = new View.OnClickListener(){
-
-        @Override
-        public void onClick(View v) {
-            Button btn = (Button)v;
-            String action;
-            if(mRunning){
-                action = Const.ACTION_CHECKING_STOP;
-                mRunning = false;
-            }else{
-                action = Const.ACTION_CHECKING_START;
-                mRunning = true;
-            }
-            Intent i = new Intent(action);
-            LocalBroadcastManager.getInstance(WalkCheckerActivity.this).sendBroadcast(i);
-            btn.setText(mRunning?"STOP":"START");
-        }
-    };
-
-    /**
-     * view pager adapter
-     */
-    class MyAdapter extends PagerAdapter{
-        LayoutInflater inflater;
-        View pane1;
-        View pane2;
-
-        public MyAdapter(Context c){
-            super();
-            inflater = LayoutInflater.from(c);
-        }
-
-        @Override
-        public int getCount() {
-            return 2;
-        }
-
-        @Override
-        public Object instantiateItem(ViewGroup container, int position) {
-            View v = null;
-            ViewCache vc = new ViewCache();
-            if(position == 0){
-                v = inflater.inflate(R.layout.inflate_one, null);
-                v.findViewById(R.id.btn_start).setOnClickListener(mPaneListener);
-                vc.count = (TextView)v.findViewById(R.id.tv_count);
-                vc.btn_start = (Button)v.findViewById(R.id.btn_start);
-                vc.location = (TextView)v.findViewById(R.id.tv_location);
-                vc.distance = (TextView)v.findViewById(R.id.tv_distance);
-                v.setTag(vc);
-                pane1 = v;
-            }else if(position == 1){
-                v = inflater.inflate(R.layout.inflate_two, null);
-                ListView lv = (ListView)v.findViewById(R.id.list);
-                String[] from = new String[]{WalkCheckerProvider.DbHelper.COLUMN_DATE, WalkCheckerProvider.DbHelper.COLUMN_COUNT};
-                Cursor c = getContentResolver().query(Uri.parse(Const.CONTENT_URI), from, null, null, null);
-                try{
-                    if(c != null && c.moveToFirst()){
-                        int[] to = new int[]{R.id.list_item_tv1,R.id.list_item_tv2};
-                        ListAdapterAbstract listAdapter = new ListAdapterAbstract(c);
-                        lv.setAdapter(listAdapter);
-                    }
-                }catch (Exception e){e.printStackTrace();}
-                pane2 = v;
-            }
-            mPager.addView(v,0);
-            return v;
-        }
-
-        @Override
-        public void destroyItem(ViewGroup container, int position, Object object) {
-            mPager.removeView((View)object);
-        }
-
-        @Override
-        public boolean isViewFromObject(View view, Object object) {
-            return view == object;
-        }
-
-        public void setCount(String str){
-            ViewCache vc = (ViewCache)pane1.getTag();
-            vc.count.setText(str);
-        }
-
-        public void setDistance(String str){
-            ViewCache vc = (ViewCache)pane1.getTag();
-            vc.distance.setText(str);
-        }
-
-        public void setAddr(String str){
-            ViewCache vc = (ViewCache)pane1.getTag();
-            if(str == null || str.isEmpty()) str = "??? ??? ????.";
-            vc.location.setText(str);
-        }
-        public void initDisplay(String count, String addr, String distance){
-            ViewCache vc = (ViewCache)pane1.getTag();
-            String str = null;
-            if(mRunning)
-                str = "STOP";
-            else
-                str = "START";
-            vc.btn_start.setText(str);
-            vc.count.setText(count);
-            vc.location.setText(addr);
-            vc.distance.setText(distance);
-        }
-
-        private class ViewCache{
-            TextView count;
-            TextView distance;
-            TextView location;
-            TextView date;
-            Button btn_start;
-        }
-
-        /**
-         * cursor adapter class for keyword
-         */
-        public class ListAdapterAbstract extends AbstractCurAdapter {
-
-            public ListAdapterAbstract(Cursor $c){
-                super($c);
-            }
-
-            @Override
-            public View getRowView() {
-                View v = getLayoutInflater().inflate(R.layout.list_item, null);
-                ViewCache vc = new ViewCache();
-                vc.date = (TextView)v.findViewById(R.id.list_item_tv1);
-                vc.count = (TextView)v.findViewById(R.id.list_item_tv2);
-                v.setTag(vc);
-                return v;
-            }
-
-            @Override
-            public void setRow(final Cursor c, int idx, View v, ViewGroup viewGroup) {
-                ViewCache vc = (ViewCache) v.getTag();
-                vc.date.setText(c.getString(c.getColumnIndex(WalkCheckerProvider.DbHelper.COLUMN_DATE)));
-                vc.count.setText(c.getString(c.getColumnIndex(WalkCheckerProvider.DbHelper.COLUMN_COUNT)));
-            }
-        }
-    }
-
-    /**
-     * local br receiver for communication between activity and service
-     */
-    private class LocalBroadcastReceiver extends BroadcastReceiver{
-
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            Log.v(TAG, "action="+action);
-            Message message = new Message();
-            Bundle bd = new Bundle();
-            String count = null;
-            String addr = null;
-            String distance = null;
-            if(action.equals(Const.ACTION_INIT_ACTIVITY)){
-                message.what = 0;
-                mRunning = intent.getBooleanExtra("Running", false);
-                count = intent.getStringExtra("count");
-                bd.putString("count", count);
-                addr = intent.getStringExtra("addr");
-                bd.putString("addr", addr);
-                distance = intent.getStringExtra("distance");
-                bd.putString("distance", Long.valueOf(count)*58/100+""+"m");
-            }else if(action.equals(Const.ACTION_COUNT_NOTIFY)){
-                message.what = 1;
-                count = intent.getStringExtra("count");
-                bd.putString("count", count);
-                distance = intent.getStringExtra("distance");
-                bd.putString("distance", Long.valueOf(count)*58/100+""+"m");
-            }else if(action.equals(Const.ACTION_ADDR_NOTIFY)){
-                message.what = 2;
-                addr = intent.getStringExtra("addr");
-                bd.putString("addr", addr);
-            }
-            message.setData(bd);
-            mHandler.sendMessage(message);
-        }
-    }
 }

@@ -64,14 +64,22 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     private static long COUNT;
     private static String ADDR;
     private static String DATE;
+
     public static long getCount() {
         return COUNT;
     }
+
     public static String getADDR() {
         return ADDR;
     }
-    public static String getDATE() {return DATE;}
-    public static void setDATE(String date){DATE = date;}
+
+    public static String getDATE() {
+        return DATE;
+    }
+
+    public static void setDATE(String date) {
+        DATE = date;
+    }
     // sensor vars
     private long lastTime;
     private float speed;
@@ -112,20 +120,6 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         Toast.makeText(this, "WalkCheckerService onCreated", Toast.LENGTH_SHORT).show();
     }
 
-    public void registerBroadcastReceivers(){
-        // local br
-        IntentFilter localFilter = new IntentFilter();
-        localFilter.addAction(Const.ACTION_ACTIVITY_ONRESUME);
-        localFilter.addAction(Const.ACTION_ACTIVITY_ONSTOP);
-        localFilter.addAction(Const.ACTION_CHECKING_START);
-        localFilter.addAction(Const.ACTION_CHECKING_STOP);
-        LocalBroadcastManager.getInstance(this).registerReceiver(mLocalReceiver, localFilter);
-        // global br
-        IntentFilter globalFilter = new IntentFilter();
-        globalFilter.addAction(Intent.ACTION_DATE_CHANGED);
-        registerReceiver(mDateChangedReceiver, globalFilter);
-    }
-
     /**
      * just in case that android os kill this service, just store current data to pref in advance.
      */
@@ -146,11 +140,11 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         int res = super.onStartCommand(intent, flags, startId);
-        Log.v(TAG, "onStartCommand intent=" + intent+", mIntent="+mIntent);
+        Log.v(TAG, "onStartCommand intent=" + intent);
 
         // this is the case system kills me for some reason. so, restore previous data
         if (intent == null) {
-            Log.v(TAG, "COUNT="+COUNT);
+            Log.v(TAG, "COUNT=" + COUNT);
             restorePreviousData();
             Toast.makeText(this, "restored!", Toast.LENGTH_SHORT).show();
         }
@@ -158,32 +152,10 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         return Service.START_STICKY;
     }
 
-    private void restorePreviousData() {
-        SharedPreferences prefdefault = PreferenceManager.getDefaultSharedPreferences(WalkCheckerService.this);
-        mRunning = prefdefault.getBoolean("Running", false);
-        Log.v(TAG, "restorePreviousData mRunning=" + mRunning + ", COUNT=" + COUNT);
-        if (mRunning) {
-            COUNT = prefdefault.getInt("count", 0);
-            Log.v(TAG, "restorePreviousData COUNT=" + COUNT);
-            SharedPreferences pref = getSharedPreferences("myPref", 0);
-            SharedPreferences.Editor edit = pref.edit();
-            edit.putBoolean("Running", false);
-            edit.commit();
-        }
-    }
-
-    private void saveCurrentData() {
-        SharedPreferences pref = getSharedPreferences("myPref", 0);
-        SharedPreferences.Editor edit = pref.edit();
-        edit.putLong("count", COUNT);
-        edit.putBoolean("Running", mRunning);
-        edit.commit();
-    }
-
     @Override
     public void onTaskRemoved(Intent rootIntent) {
         super.onTaskRemoved(rootIntent);
-        Log.v(TAG, "onTaskRemoved COUNT="+COUNT);
+        Log.v(TAG, "onTaskRemoved COUNT=" + COUNT);
     }
 
     @Override
@@ -224,9 +196,9 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                         LocalBroadcastManager.getInstance(this).sendBroadcast(i);
                     } else if (mDisplayState == 2) {
                         TextView count = (TextView) mView.findViewById(R.id.mini_tv1);
-                        count.setText(COUNT+"");
+                        count.setText(COUNT + "");
                         TextView addr = (TextView) mView.findViewById(R.id.mini_tv2);
-                        addr.setText(COUNT*58/100+""+"m");
+                        addr.setText(COUNT * 58 / 100 + "" + "m");
                     }
                 }
                 lastX = event.values[SensorManager.DATA_X];
@@ -251,9 +223,9 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         // release listener and receiver
         if (mSensor != null)
             mSensor.unregisterListener(this);
-        if(mDateChangedReceiver != null)
+        if (mDateChangedReceiver != null)
             unregisterReceiver(mDateChangedReceiver);
-        if(mLocalReceiver != null)
+        if (mLocalReceiver != null)
             LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalReceiver);
     }
 
@@ -293,20 +265,66 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         @Override
         public void onLocationChanged(Location loc) {
             Log.v(TAG, "Location changed : Lat" + loc.getLatitude() + "Lng: " + loc.getLongitude());
-
             // revert lat/lng to address through http
             executeHttp(loc.getLatitude() + "", loc.getLongitude() + "");
         }
 
         @Override
-        public void onStatusChanged(String provider, int status, Bundle extras) {}
+        public void onStatusChanged(String provider, int status, Bundle extras) {
+        }
 
         @Override
-        public void onProviderEnabled(String provider) {}
+        public void onProviderEnabled(String provider) {
+        }
 
         @Override
-        public void onProviderDisabled(String provider) {}
+        public void onProviderDisabled(String provider) {
+        }
     }
+
+    /**
+     * local br receiver for comm among components
+     */
+    private class LocalBroadcastReceiver extends BroadcastReceiver {
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            Log.v(TAG, "action=" + action);
+
+            if (action.equals(Const.ACTION_ACTIVITY_ONRESUME)) { // activity launched
+                // remove mini view if exists
+                if (mDisplayState == 2) {
+                    wm.removeView(mView);
+                }
+                // restore previous data if killed by system
+                // restorePreviousData(); //Log.v(TAG, "mRunning=" + mRunning + ", COUNT=" + COUNT);
+                // init display for activity
+                initActivityDisplay();
+                mDisplayState = 1;
+            } else if (action.equals(Const.ACTION_ACTIVITY_ONSTOP)) { // activity stopped
+                if (mRunning) {
+                    // launch mini view
+                    initMiniViewDisplay();
+                    mDisplayState = 2;
+                } else
+                    mDisplayState = 0;
+            } else if (action.equals(Const.ACTION_WALKING_START)) { // walking started
+                // set current date
+                setCurrentDate();
+                // start listening from accelerometer
+                startListeningAccelerometer();
+                // start listening from gps
+                startListeningGps();
+                mDisplayState = 1;// for the first time, it means no service started yet
+            } else if (action.equals(Const.ACTION_WALKING_STOP)) { // walking stopped
+                // stop listening all sensors
+                stopListeningAll();
+            }
+        }
+    }
+
+    /************************************ apis ***************************************************/
 
     /**
      * Http api.
@@ -314,10 +332,10 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
      * @param lat
      * @param lng
      */
-    void executeHttp(String lat, String lng){
+    void executeHttp(String lat, String lng) {
 
         // make url
-        String latlng = lng+","+lat;//latlng = "127.1052133,37.3595316";
+        String latlng = lng + "," + lat;// ex) latlng = "127.1052133,37.3595316";
         Uri.Builder builder = new Uri.Builder();
         try {
             builder.scheme("https").encodedAuthority("openapi.naver.com").appendEncodedPath("v1").appendEncodedPath("map").appendEncodedPath("reversegeocode")
@@ -327,18 +345,18 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
             e.printStackTrace();
         }
         String url = builder.build().toString();
-        Log.v(TAG, "executeHttp url="+url);
+        Log.v(TAG, "executeHttp url=" + url);
 
         // create http engine
         HttpAsyncTask httpEngine = new HttpAsyncTask(new HttpAsyncTask.OnDataLoadedListener() {
             @Override
             public void onDataLoaded(int resCode, String result) {
                 Log.v(TAG, "resCode=" + resCode + ", result=" + result);
-                if(result == null) {
+                if (result == null) {
                     Toast.makeText(WalkCheckerService.this, "result null", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                if(resCode >= HttpURLConnection.HTTP_BAD_REQUEST){
+                if (resCode >= HttpURLConnection.HTTP_BAD_REQUEST) {
                     try {
                         JSONObject root = new JSONObject(result);
                         String message = root.getString("errorMessage");
@@ -347,10 +365,10 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                     } catch (JSONException e) {
                         e.printStackTrace();
                     }
-                }else{
+                } else {
                     JsonUtil json = new JsonUtil(WalkCheckerService.this, result);
                     String addr = json.getAddr();
-                    Log.v(TAG, "addr="+addr);
+                    Log.v(TAG, "addr=" + addr);
                     ADDR = addr;
                 }
                 Intent i = new Intent(Const.ACTION_ADDR_NOTIFY);
@@ -377,97 +395,115 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         httpEngine.execute(url);
     }
 
-    /**
-     * local br receiver for comm among components
-     */
-    private class LocalBroadcastReceiver extends BroadcastReceiver {
-
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            Log.v(TAG, "action=" + action);
-
-            if (action.equals(Const.ACTION_ACTIVITY_ONRESUME)) {
-
-                if (mDisplayState == 2) {
-                    wm.removeView(mView);
-                }
-
-                //다른루틴으로..restorePreviousData();
-                Log.v(TAG, "mRunning=" + mRunning + ", COUNT=" + COUNT);
-
-                Intent i = new Intent(Const.ACTION_INIT_ACTIVITY);
-                i.putExtra("Running", mRunning);
-                i.putExtra("count", COUNT + "");
-                i.putExtra("addr", ADDR);
-                LocalBroadcastManager.getInstance(WalkCheckerService.this).sendBroadcast(i);
-                mDisplayState = 1;
-            } else if (action.equals(Const.ACTION_ACTIVITY_ONSTOP)) {
-                if (mRunning) {
-                    mDisplayState = 2;
-                    LayoutInflater mInflater = (LayoutInflater) getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-                    mView = mInflater.inflate(R.layout.mini, null);
-                    TextView count = (TextView) mView.findViewById(R.id.mini_tv1);
-                    count.setText(COUNT + "");
-                    TextView addr = (TextView) mView.findViewById(R.id.mini_tv2);
-                    addr.setText(COUNT*58/100+""+"m");
-                    mView.setOnTouchListener(WalkCheckerService.this);
-                    /*mView.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            if (mDisplayState == 2) {
-                                Intent i = new Intent(getApplicationContext(), WalkCheckerActivity.class);
-                                startActivity(i);
-                            }
-                        }
-                    });*/
-                    wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-                    mParams = new WindowManager.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                            , WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                            , PixelFormat.TRANSPARENT);
-                    wm.addView(mView, mParams);
-                }
-            } else if (action.equals(Const.ACTION_CHECKING_START)) {
-                mDisplayState = 1;// for the first time, it means no service started yet
-                Date today = new Date();
-                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
-                String date = sdf.format(today);
-                Log.v(TAG, "date="+date);
-                DATE = date;
-                if (mAccelerometer != null) {
-                    mSensor.registerListener(WalkCheckerService.this, mAccelerometer, SensorManager.SENSOR_DELAY_GAME);
-                    mRunning = true;
-                }
-                boolean isGPSEnabled = mLocationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
-                boolean isNetworkEnabled = mLocationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
-                Log.v(TAG, "isGPSEnabled=" + isGPSEnabled + ", isNetworkEnabled=" + isNetworkEnabled);
-                if (isGPSEnabled && isNetworkEnabled) {
-
-                    //선택된 프로바이더를 사용해 위치정보를 업데이트
-                    if (ActivityCompat.checkSelfPermission(WalkCheckerService.this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(WalkCheckerService.this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                        // TODO: Consider calling
-                        //    ActivityCompat#requestPermissions
-                        // here to request the missing permissions, and then overriding
-                        //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                        //                                          int[] grantResults)
-                        // to handle the case where the user grants the permission. See the documentation
-                        // for ActivityCompat#requestPermissions for more details.
-                        return;
-                    }
-                    mLocationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 500, 10, mLocationListener);
-                    mLocationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 500, 10, mLocationListener);
-                } else {
-                    Toast.makeText(WalkCheckerService.this, "turn on gps", Toast.LENGTH_SHORT).show();
-                }
-
-            }else if(action.equals(Const.ACTION_CHECKING_STOP)){
-                if(mSensor != null) {
-                    Log.v(TAG, "sensor unregi..");
-                    mSensor.unregisterListener(WalkCheckerService.this);
-                    mRunning = false;
-                }
-                mLocationManager.removeUpdates(mLocationListener);
-            }
+    private void restorePreviousData() {
+        SharedPreferences prefdefault = PreferenceManager.getDefaultSharedPreferences(WalkCheckerService.this);
+        mRunning = prefdefault.getBoolean("Running", false);
+        Log.v(TAG, "restorePreviousData mRunning=" + mRunning + ", COUNT=" + COUNT);
+        if (mRunning) {
+            COUNT = prefdefault.getInt("count", 0);
+            Log.v(TAG, "restorePreviousData COUNT=" + COUNT);
+            SharedPreferences pref = getSharedPreferences("myPref", 0);
+            SharedPreferences.Editor edit = pref.edit();
+            edit.putBoolean("Running", false);
+            edit.commit();
         }
+    }
+
+    private void saveCurrentData() {
+        SharedPreferences pref = getSharedPreferences("myPref", 0);
+        SharedPreferences.Editor edit = pref.edit();
+        edit.putLong("count", COUNT);
+        edit.putBoolean("Running", mRunning);
+        edit.commit();
+    }
+
+    public void registerBroadcastReceivers() {
+        // local br
+        IntentFilter localFilter = new IntentFilter();
+        localFilter.addAction(Const.ACTION_ACTIVITY_ONRESUME);
+        localFilter.addAction(Const.ACTION_ACTIVITY_ONSTOP);
+        localFilter.addAction(Const.ACTION_WALKING_START);
+        localFilter.addAction(Const.ACTION_WALKING_STOP);
+        LocalBroadcastManager.getInstance(this).registerReceiver(mLocalReceiver, localFilter);
+        // global br
+        IntentFilter globalFilter = new IntentFilter();
+        globalFilter.addAction(Intent.ACTION_DATE_CHANGED);
+        registerReceiver(mDateChangedReceiver, globalFilter);
+    }
+
+    private void initActivityDisplay() {
+        Intent i = new Intent(Const.ACTION_INIT_ACTIVITY);
+        i.putExtra("Running", mRunning);
+        i.putExtra("count", COUNT + "");
+        i.putExtra("addr", ADDR);
+        LocalBroadcastManager.getInstance(WalkCheckerService.this).sendBroadcast(i);
+    }
+
+    private void initMiniViewDisplay() {
+        LayoutInflater mInflater = (LayoutInflater) getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+        mView = mInflater.inflate(R.layout.mini, null);
+        TextView count = (TextView) mView.findViewById(R.id.mini_tv1);
+        count.setText(COUNT + "");
+        TextView addr = (TextView) mView.findViewById(R.id.mini_tv2);
+        addr.setText(COUNT * 58 / 100 + "" + "m");
+        mView.setOnTouchListener(WalkCheckerService.this);
+        /*mView.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mDisplayState == 2) {
+                    Intent i = new Intent(getApplicationContext(), WalkCheckerActivity.class);
+                    startActivity(i);
+                }
+            }
+        });*/
+        wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        mParams = new WindowManager.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                , WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                , PixelFormat.TRANSPARENT);
+        wm.addView(mView, mParams);
+    }
+
+    private void setCurrentDate() {
+        Date today = new Date();
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        String date = sdf.format(today);
+        Log.v(TAG, "date=" + date);
+        DATE = date;
+    }
+
+    private void startListeningAccelerometer() {
+        if (mAccelerometer != null) {
+            mSensor.registerListener(WalkCheckerService.this, mAccelerometer, SensorManager.SENSOR_DELAY_GAME);
+            mRunning = true;
+        }
+    }
+
+    private void startListeningGps() {
+        boolean isGPSEnabled = mLocationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        boolean isNetworkEnabled = mLocationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        Log.v(TAG, "isGPSEnabled=" + isGPSEnabled + ", isNetworkEnabled=" + isNetworkEnabled);
+        if (isGPSEnabled && isNetworkEnabled) {
+            if (ActivityCompat.checkSelfPermission(WalkCheckerService.this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(WalkCheckerService.this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(WalkCheckerService.this, "please turn on gps", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            mLocationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5000, 10, mLocationListener);
+            mLocationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5000, 10, mLocationListener);
+        } else {
+            Toast.makeText(WalkCheckerService.this, "please turn on gps", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void stopListeningAll() {
+        if (mSensor != null) {
+            Log.v(TAG, "sensor unregi..");
+            mSensor.unregisterListener(WalkCheckerService.this);
+            mRunning = false;
+        }
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(WalkCheckerService.this, "gps permission is not acquired", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        mLocationManager.removeUpdates(mLocationListener);
     }
 }

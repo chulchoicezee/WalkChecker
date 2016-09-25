@@ -22,14 +22,15 @@ public class WalkCheckerProvider extends ContentProvider {
 
     @Override
     public boolean onCreate() {
-        // TODO: Implement this to initialize your content provider on startup.
+
+        // create only open helper, not real database to avoid unnecessary load at this time
         mDbHelper = new DbHelper(getContext(), DB_NAME, null, DB_VER);
+
         return true;
     }
 
     @Override
     public String getType(Uri uri) {
-        // TODO: Implement this to handle requests for the MIME type of the data
         // at the given URI.
         return Const.CONTENT_URI;
     }
@@ -49,7 +50,7 @@ public class WalkCheckerProvider extends ContentProvider {
         if(row > 0){
             Uri notiUri = ContentUris.withAppendedId(CONTENT_URI, row);
             getContext().getContentResolver().notifyChange(notiUri, null);
-            return uri;
+            return notiUri;
         }
         return null;
     }
@@ -73,7 +74,7 @@ public class WalkCheckerProvider extends ContentProvider {
     }
 
     /**
-     * data base
+     * data base helper
      */
     protected static final class DbHelper extends SQLiteOpenHelper{
         private static final String TAG = "DbHelper";

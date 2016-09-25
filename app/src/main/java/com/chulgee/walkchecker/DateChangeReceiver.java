@@ -25,9 +25,10 @@ public class DateChangeReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        //if (Intent.ACTION_TIME_TICK.equals(intent.getAction())) {
         if (Intent.ACTION_DATE_CHANGED.equals(intent.getAction())) {
             // save db
-            Log.v(TAG, "ACTION_TIME_TICK intent.getAction()="+intent.getAction());
+            Log.v(TAG, "ACTION_DATE_CHANGED intent.getAction()="+intent.getAction());
             ContentValues values = new ContentValues();
             values.put("count", WalkCheckerService.getCount());
             values.put("date", WalkCheckerService.getDATE());
