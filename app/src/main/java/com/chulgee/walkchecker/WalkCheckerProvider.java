@@ -76,7 +76,7 @@ public class WalkCheckerProvider extends ContentProvider {
     /**
      * data base helper
      */
-    protected static final class DbHelper extends SQLiteOpenHelper{
+    public static final class DbHelper extends SQLiteOpenHelper{
         private static final String TAG = "DbHelper";
         public static final String TABLE = "walk_checker";
         public static final String COLUMN_ID = "_id";

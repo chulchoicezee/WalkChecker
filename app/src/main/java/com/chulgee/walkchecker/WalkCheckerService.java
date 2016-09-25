@@ -59,7 +59,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
      */
     private int mDisplayState;
     // running or not
-    private boolean mRunning;
+    private static boolean mRunning;
     // static vars and getter/setter
     private static long COUNT;
     private static String ADDR;
@@ -73,16 +73,17 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         return ADDR;
     }
     public static String getDATE() { return DATE; }
+    public static boolean getRunning() { return mRunning; }
     public static void setDATE(String date) { DATE = date; }
-    public void setCount(long count){
-        SharedPreferences pref = getSharedPreferences("myPref", MODE_PRIVATE);
+    public static void setCOUNT(Context context, long count){
+        SharedPreferences pref = context.getSharedPreferences("myPref", MODE_PRIVATE);
         SharedPreferences.Editor edit = pref.edit();
         edit.putLong("count", count);
         edit.commit();
         COUNT = count;
     }
-    public void setRunning(boolean run){
-        SharedPreferences pref = getSharedPreferences("myPref", MODE_PRIVATE);
+    public static void setRunning(Context context, boolean run){
+        SharedPreferences pref = context.getSharedPreferences("myPref", MODE_PRIVATE);
         SharedPreferences.Editor edit = pref.edit();
         edit.putBoolean("Running", run);
         edit.commit();
@@ -135,8 +136,8 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     @Override
     public void onLowMemory() {
         super.onLowMemory();
-        setCount(COUNT);
-        setRunning(mRunning);
+        setCOUNT(this, COUNT);
+        setRunning(this, mRunning);
         Log.v(TAG, "onLowMemory mRunning=" + mRunning + ", COUNT=" + COUNT);
     }
 
@@ -197,7 +198,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 if (speed > SHAKE_THRESHOLD) {
                     Intent i = new Intent(Const.ACTION_COUNT_NOTIFY);
                     COUNT++;
-                    setCount(COUNT);
+                    setCOUNT(WalkCheckerService.this, COUNT);
                     mVibe.vibrate(100);
                     Log.v(TAG, "onSensorChanged got a step! count=" + COUNT + ", mDisplayState=" + mDisplayState);
 
@@ -228,8 +229,8 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         super.onDestroy();
         Log.v(TAG, "onDestroy mSensor=" + mSensor);
 
-        setCount(COUNT);
-        setRunning(mRunning);
+        setCOUNT(this, COUNT);
+        setRunning(this, mRunning);
         Log.v(TAG, "onDestroy mRunning=" + mRunning + ", COUNT=" + COUNT);
 
         // release listener and receiver
@@ -336,12 +337,12 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 startListeningAccelerometer();
                 // start listening from gps
                 startListeningGps();
-                setRunning(true);
+                setRunning(WalkCheckerService.this, true);
                 mDisplayState = 1;// for the first time, it means no service started yet
             } else if (action.equals(Const.ACTION_WALKING_STOP)) { // walking stopped
                 // stop listening all sensors
                 stopListeningAll();
-                setRunning(false);
+                setRunning(WalkCheckerService.this, false);
             }
         }
     }
