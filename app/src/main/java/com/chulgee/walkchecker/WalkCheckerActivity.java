@@ -134,8 +134,10 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
     @Override
     protected void onStop() {
         super.onStop();
-        Intent i = new Intent(Const.ACTION_ACTIVITY_ONSTOP);
-        LocalBroadcastManager.getInstance(this).sendBroadcast(i);
+        if(canOverlay) {
+            Intent i = new Intent(Const.ACTION_ACTIVITY_ONSTOP);
+            LocalBroadcastManager.getInstance(this).sendBroadcast(i);
+        }
     }
 
     @Override
