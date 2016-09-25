@@ -16,20 +16,23 @@ import java.util.Date;
 public class DateChangeReceiver extends BroadcastReceiver {
 
     private static final String TAG = "DateChangeReceiver";
+    static int temp;
+    private Context context;
 
-    public DateChangeReceiver() {
+    public DateChangeReceiver(Context $context) {
+        context = $context;
     }
 
     @Override
     public void onReceive(Context context, Intent intent) {
         if (Intent.ACTION_DATE_CHANGED.equals(intent.getAction())) {
             // save db
-            Log.v(TAG, "intent.getAction()="+intent.getAction());
+            Log.v(TAG, "ACTION_TIME_TICK intent.getAction()="+intent.getAction());
             ContentValues values = new ContentValues();
             values.put("count", WalkCheckerService.getCount());
             values.put("date", WalkCheckerService.getDATE());
-            context.getContentResolver().insert(Uri.parse(Const.CONTENT_URI), values);
-
+            Uri uri = context.getContentResolver().insert(Uri.parse(Const.CONTENT_URI), values);
+            Log.v(TAG, "insert uri="+uri);
             // set current date
             Date today = new Date();
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");

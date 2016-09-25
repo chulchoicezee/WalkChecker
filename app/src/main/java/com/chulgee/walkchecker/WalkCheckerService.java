@@ -53,34 +53,26 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
 
     /**
      * display state
-     *   none -> 0
+     *   none(no show) -> 0
      *   activity -> 1
-     *   mini window -> 2
+     *   mini view -> 2
      */
     private int mDisplayState;
-    private Intent mIntent;
-
+    // running or not
     private boolean mRunning;
+    // static vars and getter/setter
     private static long COUNT;
     private static String ADDR;
     private static String DATE;
-
     public static long getCount() {
         return COUNT;
     }
-
     public static String getADDR() {
         return ADDR;
     }
-
-    public static String getDATE() {
-        return ADDR;
-    }
-
-    public static void setDATE(String date){
-        DATE = date;
-    }
-    // sensor
+    public static String getDATE() {return DATE;}
+    public static void setDATE(String date){DATE = date;}
+    // sensor vars
     private long lastTime;
     private float speed;
     private float lastX;
@@ -91,59 +83,47 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     private SensorManager mSensor;
     private Sensor mAccelerometer;
     private Vibrator mVibe;
-
-    // mini window
+    // mini view's vars
     private WindowManager wm;
+    private View mView;
     private float mTouchX, mTouchY;
     private int mViewX, mViewY;
     private WindowManager.LayoutParams mParams;
-    private View mView;
-
-    // gps
-    private LocationManager mLocationManager = null; // 위치 정보 프로바이더
-    private LocationListener mLocationListener = null; //위치 정보가 업데이트시 동작
-
-    //local br
+    // gps vars
+    private LocationManager mLocationManager;
+    private LocationListener mLocationListener = new MyLocationListener();
+    // br listeners
     private LocalBroadcastReceiver mLocalReceiver = new LocalBroadcastReceiver();
+    private DateChangeReceiver mDateChangedReceiver = new DateChangeReceiver(this);
 
     @Override
     public void onCreate() {
         super.onCreate();
+
+        // get system services
         mSensor = (SensorManager) getSystemService(SENSOR_SERVICE);
         mAccelerometer = mSensor.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         mVibe = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-        // regi local br for comm
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(Const.ACTION_ACTIVITY_ONRESUME);
-        filter.addAction(Const.ACTION_ACTIVITY_ONSTOP);
-        filter.addAction(Const.ACTION_CHECKING_START);
-        filter.addAction(Const.ACTION_CHECKING_STOP);
-        LocalBroadcastManager.getInstance(this).registerReceiver(mLocalReceiver, filter);
-
-        // gps
         mLocationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        mLocationListener = new MyLocationListener();
-        boolean isGPSEnabled = mLocationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
-        boolean isNetworkEnabled = mLocationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
-        Log.v(TAG, "isGPSEnabled=" + isGPSEnabled + ", isNetworkEnabled=" + isNetworkEnabled);
-        if (isGPSEnabled && isNetworkEnabled) {
 
-            //선택된 프로바이더를 사용해 위치정보를 업데이트
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // TODO: Consider calling
-                //    ActivityCompat#requestPermissions
-                // here to request the missing permissions, and then overriding
-                //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                //                                          int[] grantResults)
-                // to handle the case where the user grants the permission. See the documentation
-                // for ActivityCompat#requestPermissions for more details.
-                return;
-            }
+        // regi br
+        registerBroadcastReceivers();
 
-        } else {
-            Toast.makeText(WalkCheckerService.this, "turn on gps", Toast.LENGTH_SHORT).show();
-        }
-        Toast.makeText(this, "service oncreated!", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "WalkCheckerService onCreated", Toast.LENGTH_SHORT).show();
+    }
+
+    public void registerBroadcastReceivers(){
+        // local br
+        IntentFilter localFilter = new IntentFilter();
+        localFilter.addAction(Const.ACTION_ACTIVITY_ONRESUME);
+        localFilter.addAction(Const.ACTION_ACTIVITY_ONSTOP);
+        localFilter.addAction(Const.ACTION_CHECKING_START);
+        localFilter.addAction(Const.ACTION_CHECKING_STOP);
+        LocalBroadcastManager.getInstance(this).registerReceiver(mLocalReceiver, localFilter);
+        // global br
+        IntentFilter globalFilter = new IntentFilter();
+        globalFilter.addAction(Intent.ACTION_DATE_CHANGED);
+        registerReceiver(mDateChangedReceiver, globalFilter);
     }
 
     /**
@@ -156,16 +136,25 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         Log.v(TAG, "onLowMemory mRunning=" + mRunning + ", COUNT=" + COUNT);
     }
 
+    /**
+     *  return START_STICKY to keep it reconnected
+     * @param intent
+     * @param flags
+     * @param startId
+     * @return
+     */
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         int res = super.onStartCommand(intent, flags, startId);
         Log.v(TAG, "onStartCommand intent=" + intent+", mIntent="+mIntent);
-        mIntent = intent;
+
+        // this is the case system kills me for some reason. so, restore previous data
         if (intent == null) {
             Log.v(TAG, "COUNT="+COUNT);
             restorePreviousData();
             Toast.makeText(this, "restored!", Toast.LENGTH_SHORT).show();
         }
+
         return Service.START_STICKY;
     }
 
@@ -204,7 +193,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     }
 
     /**
-     * judge if this is a step or not
+     * judge that this is a step or not. it needs to be tunned depending on devices.
      * @param event
      */
     @Override
@@ -213,7 +202,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
 
             long curTime = System.currentTimeMillis();
             long gapTime = curTime - lastTime;
-            Log.v(TAG, "onSensorChanged gapTime=" + gapTime);
+            //Log.v(TAG, "onSensorChanged gapTime=" + gapTime);
 
             if (gapTime > 100) {
                 lastTime = curTime;
@@ -222,18 +211,17 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 z = event.values[SensorManager.DATA_Z];
 
                 speed = Math.abs(x + y + z - lastX - lastY - lastZ) / gapTime * 10000;
-                Log.v(TAG, "onSensorChanged speed=" + speed);
+                //Log.v(TAG, "onSensorChanged speed=" + speed);
                 if (speed > SHAKE_THRESHOLD) {
-                    Intent walk = new Intent(Const.ACTION_COUNT_NOTIFY);
+                    Intent i = new Intent(Const.ACTION_COUNT_NOTIFY);
                     COUNT++;
-                    mIntent.putExtra("count", COUNT);
                     mVibe.vibrate(100);
-                    Log.v(TAG, "onSensorChanged notify count=" + COUNT + ", mDisplayState=" + mDisplayState);
+                    Log.v(TAG, "onSensorChanged got a step! count=" + COUNT + ", mDisplayState=" + mDisplayState);
 
-                    // deliver data to display clients
+                    // deliver data to console for display. ex) activity or mini view
                     if (mDisplayState == 1) {
-                        walk.putExtra("count", COUNT + "");
-                        LocalBroadcastManager.getInstance(this).sendBroadcast(walk);
+                        i.putExtra("count", COUNT + "");
+                        LocalBroadcastManager.getInstance(this).sendBroadcast(i);
                     } else if (mDisplayState == 2) {
                         TextView count = (TextView) mView.findViewById(R.id.mini_tv1);
                         count.setText(COUNT+"");
@@ -260,12 +248,17 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
             saveCurrentData();
             Log.v(TAG, "onDestroy mRunning=" + mRunning + ", COUNT=" + COUNT);
         }
+        // release listener and receiver
         if (mSensor != null)
             mSensor.unregisterListener(this);
+        if(mDateChangedReceiver != null)
+            unregisterReceiver(mDateChangedReceiver);
+        if(mLocalReceiver != null)
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalReceiver);
     }
 
     /**
-     * for drag and drop
+     * for drag and drop of mini view
      * @param v
      * @param event
      * @return
@@ -298,34 +291,33 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     private class MyLocationListener implements LocationListener {
 
         @Override
-        //LocationListener을 이용해서 위치정보가 업데이트 되었을때 동작 구현
         public void onLocationChanged(Location loc) {
             Log.v(TAG, "Location changed : Lat" + loc.getLatitude() + "Lng: " + loc.getLongitude());
+
+            // revert lat/lng to address through http
             executeHttp(loc.getLatitude() + "", loc.getLongitude() + "");
         }
 
         @Override
-        public void onStatusChanged(String provider, int status, Bundle extras) {
-        }
+        public void onStatusChanged(String provider, int status, Bundle extras) {}
 
         @Override
-        public void onProviderEnabled(String provider) {
-        }
+        public void onProviderEnabled(String provider) {}
 
         @Override
-        public void onProviderDisabled(String provider) {
-        }
+        public void onProviderDisabled(String provider) {}
     }
 
     /**
-     * Http api
+     * Http api.
+     * it can handle all HTTP tasks including ui access task.
      * @param lat
      * @param lng
      */
     void executeHttp(String lat, String lng){
 
         // make url
-        String latlng = lat+","+lng;//latlng = "127.1052133,37.3595316";
+        String latlng = lng+","+lat;//latlng = "127.1052133,37.3595316";
         Uri.Builder builder = new Uri.Builder();
         try {
             builder.scheme("https").encodedAuthority("openapi.naver.com").appendEncodedPath("v1").appendEncodedPath("map").appendEncodedPath("reversegeocode")
@@ -335,7 +327,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
             e.printStackTrace();
         }
         String url = builder.build().toString();
-        Log.v(TAG, "excuteHttp url="+url);
+        Log.v(TAG, "executeHttp url="+url);
 
         // create http engine
         HttpAsyncTask httpEngine = new HttpAsyncTask(new HttpAsyncTask.OnDataLoadedListener() {
@@ -432,7 +424,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                     wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
                     mParams = new WindowManager.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
                             , WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                            , PixelFormat.OPAQUE);
+                            , PixelFormat.TRANSPARENT);
                     wm.addView(mView, mParams);
                 }
             } else if (action.equals(Const.ACTION_CHECKING_START)) {

@@ -8,7 +8,7 @@ import android.widget.BaseAdapter;
 /**
  * Created by chulchoice on 2016-05-21.
  */
-public abstract class CurAdapter extends BaseAdapter{
+public abstract class AbstractCurAdapter extends BaseAdapter{
 
     public abstract View getRowView();
 
@@ -16,7 +16,7 @@ public abstract class CurAdapter extends BaseAdapter{
 
     private Cursor c;
 
-    public CurAdapter(Cursor $c){
+    public AbstractCurAdapter(Cursor $c){
         c = $c;
     }
 

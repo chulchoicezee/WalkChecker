@@ -31,7 +31,7 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.chulgee.walkchecker.adapter.CurAdapter;
+import com.chulgee.walkchecker.adapter.AbstractCurAdapter;
 import com.chulgee.walkchecker.util.Const;
 
 public class WalkCheckerActivity extends Activity implements View.OnClickListener {
@@ -284,7 +284,7 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
                 try{
                     if(c != null && c.moveToFirst()){
                         int[] to = new int[]{R.id.list_item_tv1,R.id.list_item_tv2};
-                        ListAdapter listAdapter = new ListAdapter(c);
+                        ListAdapterAbstract listAdapter = new ListAdapterAbstract(c);
                         lv.setAdapter(listAdapter);
                     }
                 }catch (Exception e){e.printStackTrace();}
@@ -343,9 +343,9 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
         /**
          * cursor adapter class for keyword
          */
-        public class ListAdapter extends CurAdapter {
+        public class ListAdapterAbstract extends AbstractCurAdapter {
 
-            public ListAdapter(Cursor $c){
+            public ListAdapterAbstract(Cursor $c){
                 super($c);
             }
 
