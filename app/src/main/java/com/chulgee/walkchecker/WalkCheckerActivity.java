@@ -155,7 +155,7 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
     }
 
     /**
-     * local br receiver for communication between activity and service
+     * local br receiver for communication between activity and service.
      */
     private class LocalBroadcastReceiver extends BroadcastReceiver{
 
