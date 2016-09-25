@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <LinearLayout
+        android:id="@+id/container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="5dp"
+        android:layout_margin="10dp" >
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <ImageView
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:src="@drawable/foot"
+                android:layout_gravity="left"/>
+            <View
+                android:layout_width="10dp"
+                android:layout_height="0dp"/>
+            <TextView
+                android:id="@+id/mini_tv1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
+                android:text="0"
+                android:textColor="#ffff3366"
+                android:textStyle="bold"
+                android:textSize="24dp"
+                android:layout_weight="2"/>
+        </LinearLayout>
+        <TextView
+            android:id="@+id/mini_tv2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:layout_gravity="right"
+            android:textColor="#ff231299"
+            android:textStyle="bold"
+            android:textSize="24dp"
+            android:text="0m"  />
+    </LinearLayout>
+</LinearLayout>
