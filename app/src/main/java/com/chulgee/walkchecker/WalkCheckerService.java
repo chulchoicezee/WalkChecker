@@ -152,7 +152,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         int res = super.onStartCommand(intent, flags, startId);
         Log.v(TAG, "onStartCommand intent=" + intent);
 
-        // this is the case system kills me for some reason. so, restore previous data
+        // this is for the case that system kills this service for some reason. so, restore previous data
         if (intent == null) {
             Log.v(TAG, "COUNT=" + COUNT);
             restoreData();
