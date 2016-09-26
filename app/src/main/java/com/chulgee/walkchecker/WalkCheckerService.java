@@ -1,6 +1,8 @@
 package com.chulgee.walkchecker;
 
 import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationManager;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -17,12 +19,14 @@ import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.Vibrator;
 import android.preference.PreferenceManager;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -312,6 +316,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 // remove mini view if exists
                 if (mDisplayState == 2) {
                     wm.removeView(mView);
+                    stopForeground(true);
                 }
                 // init display for activity
                 initActivityDisplay();
@@ -469,6 +474,18 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 , WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                 , PixelFormat.TRANSPARENT);
         wm.addView(mView, mParams);
+        // keep it alive when low memory
+        startForeground(1, new Notification());
+        NotificationManager nm = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+        Notification notification = null;
+        notification = new Notification.Builder(getApplicationContext())
+                .setContentTitle("")
+                .setContentText("")
+                .setSmallIcon(R.drawable.foot)
+                .build();
+        nm.notify(1, notification);
+        nm.cancel(1);
+
     }
 
     private void startListeningAccelerometer() {
