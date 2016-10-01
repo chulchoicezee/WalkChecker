@@ -4,16 +4,19 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Message;
 import android.provider.Settings;
 import android.support.v4.app.ActivityCompat;
@@ -29,16 +32,29 @@ import com.chulgee.walkchecker.util.Const;
 public class WalkCheckerActivity extends Activity implements View.OnClickListener {
 
     private static final String TAG = "WalkCheckerActivity";
+
     // view vars
     private ViewPager mPager;
     private Button btn_one;
     private Button btn_two;
-    // walking stared or not
+
+    // info vars
     private boolean mRunning;
-    public boolean getRunning(){ return mRunning; }
-    public void setRunning(boolean run){ mRunning = run; }
+    private String mCount;
+    private String mDistance;
+    private String mDate;
+    private String mAddr;
+    public boolean getRunning(){    return mRunning;    }
+    public void setRunning(boolean run){    mRunning = run;    }
+
+    // service
+    WalkCheckerService mService;
+    boolean mBound;
+
     // permission for overlay
     private boolean canOverlay;
+    private boolean canGPS;
+
     // local br and listener
     private LocalBroadcastReceiver mLocalReceiver = new LocalBroadcastReceiver();
     private LocationManager mLocationManager = null;
@@ -61,9 +77,42 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
                 case Const.PARAM_ACT_UPDATE_LOCATION:
                     updateLocation(b);
                     break;
+                case Const.PARAM_ACT_CHECK_PERMISSION:
+                    if(canOverlayWindow(WalkCheckerActivity.this)){
+                        checkPermissionForGps();
+                    }
+                    break;
+                case Const.PARAM_ACT_REMOVE_MINI_VIEW:
+                    if(canOverlay) {
+                        Intent i = new Intent(Const.ACTION_ACTIVITY_ONRESUME);
+                        LocalBroadcastManager.getInstance(WalkCheckerActivity.this).sendBroadcast(i);
+                    }
+                    break;
                 default:
                     break;
             }
+        }
+    };
+
+    // Service connection
+    ServiceConnection mServiceConnection = new ServiceConnection() {
+
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            WalkCheckerService.LocalBinder binder = (WalkCheckerService.LocalBinder)service;
+            Log.v(WalkCheckerActivity.TAG, "onServiceConnected canOverlay="+canOverlay);
+            mService = binder.getService();
+            mBound = true;
+            // to display activity for the first time when service is created
+            scheduleUpdateAll();
+            // to handle mini view. just to notify onResume to service, for the first time when service is created
+            mHandler.sendEmptyMessage(Const.PARAM_ACT_REMOVE_MINI_VIEW);
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            Log.v(WalkCheckerActivity.TAG, "onServiceDisconnected");
+            mBound = false;
         }
     };
 
@@ -71,6 +120,7 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        Log.v(TAG, "onCreate");
 
         // init views and adapter
         initViews();
@@ -78,26 +128,64 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
         // register local broadcast
         registerLocalBr();
 
-        // check permission
-        checkPermissionForGps();
+        // start service to get service running in background
+        Intent i = new Intent(WalkCheckerActivity.this, WalkCheckerService.class);
+        startService(i);
+
+        // bind service to get info from service
+        bindService(i, mServiceConnection, BIND_AUTO_CREATE);
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        switch(requestCode){
-            case 1:
-                if(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
-                    Toast.makeText(WalkCheckerActivity.this, "GPS available", Toast.LENGTH_SHORT).show();
-                }else{
-                    Toast.makeText(WalkCheckerActivity.this, "Please turn on GPS next time", Toast.LENGTH_SHORT).show();
-                    finish();
-                }
-                break;
-            default:
-                break;
+    protected void onResume() {
+        super.onResume();
+        Log.v(TAG, "onResume canOverlay="+canOverlay);
+
+        // to display activity for the first time when service is created
+        if(mBound){
+            scheduleUpdateAll();
+        }
+
+        // check permission
+        if(!canOverlay || !canGPS)
+            mHandler.sendEmptyMessage(Const.PARAM_ACT_CHECK_PERMISSION);
+
+        // to handle mini view. just to notify onResume to service
+        if(canOverlay) {
+            Intent i = new Intent(Const.ACTION_ACTIVITY_ONRESUME);
+            LocalBroadcastManager.getInstance(this).sendBroadcast(i);
         }
     }
 
+    @Override
+    protected void onStop() {
+        super.onStop();
+        Log.v(TAG, "onStop");
+
+        // to handle mini view. just to notify onStop to service
+        if(canOverlay) {
+            Intent i = new Intent(Const.ACTION_ACTIVITY_ONSTOP);
+            LocalBroadcastManager.getInstance(this).sendBroadcast(i);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        Log.v(TAG, "onDestroy");
+
+        // unregister receiver and binded service
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalReceiver);
+        if(mBound)
+            unbindService(mServiceConnection);
+    }
+
+    /**
+     * receiver for system overlay
+     * @param requestCode
+     * @param resultCode
+     * @param data
+     */
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -107,8 +195,6 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
                     && Settings.canDrawOverlays(this)) {
                 canOverlay = true;
                 Toast.makeText(this, "Overlay available", Toast.LENGTH_SHORT).show();
-                Intent i = new Intent(WalkCheckerActivity.this, WalkCheckerService.class);
-                startService(i);
             } else {
                 Toast.makeText(this, "Overlay not available", Toast.LENGTH_SHORT).show();
                 finish();
@@ -116,21 +202,26 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
         }
     }
 
+    /**
+     * receiver for gps permission
+     * @param requestCode
+     * @param permissions
+     * @param grantResults
+     */
     @Override
-    protected void onResume() {
-        super.onResume();
-        if(canOverlayWindow(this)) {
-            Intent i = new Intent(Const.ACTION_ACTIVITY_ONRESUME);
-            LocalBroadcastManager.getInstance(this).sendBroadcast(i);
-        }
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        if(canOverlay) {
-            Intent i = new Intent(Const.ACTION_ACTIVITY_ONSTOP);
-            LocalBroadcastManager.getInstance(this).sendBroadcast(i);
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        switch(requestCode){
+            case 1:
+                if(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
+                    canGPS = true;
+                    Toast.makeText(WalkCheckerActivity.this, "GPS available", Toast.LENGTH_SHORT).show();
+                }else{
+                    Toast.makeText(WalkCheckerActivity.this, "Please turn on GPS next time.", Toast.LENGTH_SHORT).show();
+                    finish();
+                }
+                break;
+            default:
+                break;
         }
     }
 
@@ -148,12 +239,6 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
         }
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalReceiver);
-    }
-
     /**
      * local br receiver for communication between activity and service.
      */
@@ -166,29 +251,16 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
 
             Message message = new Message();
             Bundle bd = new Bundle();
-            String count = null;
             String addr = null;
-            String distance = null;
 
-            if(action.equals(Const.ACTION_INIT_ACTIVITY)){
-
-                // update all views in activity
-                message.what = Const.PARAM_ACT_UPDATE_ALL;
-                mRunning = intent.getBooleanExtra("Running", false);
-                count = intent.getStringExtra("count");
-                bd.putString("count", count);
-                addr = intent.getStringExtra("addr");
-                bd.putString("addr", addr);
-                distance = intent.getStringExtra("distance");
-                bd.putString("distance", Long.valueOf(count)*58/100+""+"m");
-            }else if(action.equals(Const.ACTION_COUNT_NOTIFY)){
+            if(action.equals(Const.ACTION_COUNT_NOTIFY)){
 
                 // update count and distance
                 message.what = Const.PARAM_ACT_UPDATE_COUNT_DISTANCE;
-                count = intent.getStringExtra("count");
-                bd.putString("count", count);
-                distance = intent.getStringExtra("distance");
-                bd.putString("distance", Long.valueOf(count)*58/100+""+"m");
+                long count = intent.getLongExtra("count", 0);
+                bd.putString("count", count+"");
+                long distance = intent.getLongExtra("distance", 0);
+                bd.putString("distance", distance+"m");
             }else if(action.equals(Const.ACTION_ADDR_NOTIFY)){
 
                 // update location
@@ -231,17 +303,15 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
             Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
             startActivityForResult(intent, 1);
         } else {
-            //start service
-            Intent i = new Intent(WalkCheckerActivity.this, WalkCheckerService.class);
-            startService(i);
             canOverlay = ret = true;
         }
+        Log.v(TAG, "canOverlayWindow canOverlay="+canOverlay);
         return ret;
     }
 
-    private void checkPermissionForGps(){
+    private boolean checkPermissionForGps(){
         mLocationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-
+        boolean ret = false;
         boolean isGPSEnabled = mLocationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
         boolean isNetworkEnabled = mLocationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
         Log.v(TAG, "isGPSEnabled="+isGPSEnabled+", isNetworkEnabled="+isNetworkEnabled);
@@ -267,11 +337,13 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
                 }else{
                     ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION}, 1);
                 }
-                return;
-            }
+            }else
+                canGPS = ret = true;
         }else{
             Toast.makeText(WalkCheckerActivity.this, "Please turn on GPS", Toast.LENGTH_SHORT).show();
         }
+
+        return ret;
     }
 
     private void updateAll(Bundle b){
@@ -297,4 +369,23 @@ public class WalkCheckerActivity extends Activity implements View.OnClickListene
             ((MyPagerAdapter) (mPager.getAdapter())).setAddr(addr);
     }
 
+    private void scheduleUpdateAll(){
+        mRunning = mService.getRunning();
+        mCount = mService.getCount()+"";
+        mDistance = mService.getDistance()+"m";
+        mDate = mService.getDATE();
+        mAddr = mService.getADDR();
+        Message m = new Message();
+        m.what = Const.PARAM_ACT_UPDATE_ALL;
+        Bundle bd = new Bundle();
+        bd.putString("count", mCount);
+        bd.putString("distance", mDistance);
+        bd.putBoolean("Running", mRunning);
+        bd.putString("date", mDate);
+        bd.putString("addr", mAddr);
+        m.setData(bd);
+        Log.v(WalkCheckerActivity.TAG, "onServiceConnected mCount="+mCount+", mDistance="+mDistance+", mRunning="+mRunning);
+
+        mHandler.sendMessage(m);
+    }
 }

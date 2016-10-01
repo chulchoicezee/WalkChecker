@@ -20,12 +20,12 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.os.Message;
 import android.os.Vibrator;
-import android.preference.PreferenceManager;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
@@ -62,36 +62,46 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
      *   mini view -> 2
      */
     private int mDisplayState;
-    // running or not
-    private static boolean mRunning;
-    // static vars and getter/setter
-    private static long COUNT;
-    private static String ADDR;
-    private static String DATE;
+    private String ADDR;
+    public String getADDR() { return ADDR; }
 
+    // preference vars : mRunning, count, date, distance
+    private boolean mRunning;
+    private long COUNT;
+    private long DISTANCE;
+    private String DATE;
     // getter / setter
-    public static long getCount() {
-        return COUNT;
+    public boolean getRunning() { return mRunning; }
+    public long getCount() { return COUNT ;}
+    public long getDistance() { return DISTANCE; }
+    public String getDATE() { return DATE; }
+    public void setRunning(Context context, boolean run){
+        SharedPreferences pref = context.getSharedPreferences("myPref", MODE_PRIVATE);
+        SharedPreferences.Editor edit = pref.edit();
+        edit.putBoolean("Running", run);
+        edit.commit();
+        mRunning = run;
     }
-    public static String getADDR() {
-        return ADDR;
-    }
-    public static String getDATE() { return DATE; }
-    public static boolean getRunning() { return mRunning; }
-    public static void setDATE(String date) { DATE = date; }
-    public static void setCOUNT(Context context, long count){
+    public void setCOUNT(Context context, long count){
         SharedPreferences pref = context.getSharedPreferences("myPref", MODE_PRIVATE);
         SharedPreferences.Editor edit = pref.edit();
         edit.putLong("count", count);
         edit.commit();
         COUNT = count;
     }
-    public static void setRunning(Context context, boolean run){
+    public void setDISTANCE(Context context, long distance){
         SharedPreferences pref = context.getSharedPreferences("myPref", MODE_PRIVATE);
         SharedPreferences.Editor edit = pref.edit();
-        edit.putBoolean("Running", run);
+        edit.putLong("distance", distance);
         edit.commit();
-        mRunning = run;
+        DISTANCE = distance;
+    }
+    public void setDATE(Context context, String date) {
+        SharedPreferences pref = context.getSharedPreferences("myPref", MODE_PRIVATE);
+        SharedPreferences.Editor edit = pref.edit();
+        edit.putString("date", date);
+        edit.commit();
+        DATE = date;
     }
 
     // sensor vars
@@ -111,12 +121,21 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     private float mTouchX, mTouchY;
     private int mViewX, mViewY;
     private WindowManager.LayoutParams mParams;
+    private boolean needToLaunchActivity;
     // gps vars
     private LocationManager mLocationManager;
     private LocationListener mLocationListener = new MyLocationListener();
     // br listeners
     private LocalBroadcastReceiver mLocalReceiver = new LocalBroadcastReceiver();
     private DateChangeReceiver mDateChangedReceiver = new DateChangeReceiver(this);
+    private LocalBinder mBinder = new LocalBinder();
+    private boolean isFirst = false;
+
+    public class LocalBinder extends Binder {
+        WalkCheckerService getService(){
+            return WalkCheckerService.this;
+        }
+    }
 
     @Override
     public void onCreate() {
@@ -127,22 +146,10 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         mAccelerometer = mSensor.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         mVibe = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
         mLocationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-
+        isFirst = true;
         // regi br
         registerBroadcastReceivers();
-
-        Toast.makeText(this, "WalkCheckerService onCreated", Toast.LENGTH_SHORT).show();
-    }
-
-    /**
-     * just in case that android os kill this service, just store current data to pref in advance.
-     */
-    @Override
-    public void onLowMemory() {
-        super.onLowMemory();
-        setCOUNT(this, COUNT);
-        setRunning(this, mRunning);
-        Log.v(TAG, "onLowMemory mRunning=" + mRunning + ", COUNT=" + COUNT);
+        //Toast.makeText(this, "WalkCheckerService onCreated", Toast.LENGTH_SHORT).show();
     }
 
     /**
@@ -157,26 +164,55 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         int res = super.onStartCommand(intent, flags, startId);
         Log.v(TAG, "onStartCommand intent=" + intent);
 
+        restoreData();
+        Toast.makeText(this, "WalkChecker service started!", Toast.LENGTH_SHORT).show();
+        if(isFirst)
+            setRunning(this, false);
+        isFirst = false;
         // this is for the case that system kills this service for some reason. so, restore previous data
         if (intent == null) {
             Log.v(TAG, "COUNT=" + COUNT);
-            restoreData();
-            Toast.makeText(this, "restored!", Toast.LENGTH_SHORT).show();
         }
 
         return Service.START_STICKY;
     }
 
     @Override
-    public void onTaskRemoved(Intent rootIntent) {
-        super.onTaskRemoved(rootIntent);
-        Log.v(TAG, "onTaskRemoved COUNT=" + COUNT);
+    public IBinder onBind(Intent intent) {
+        return mBinder;
     }
 
     @Override
-    public IBinder onBind(Intent intent) {
-        // TODO: Return the communication channel to the service.
-        return null;
+    public boolean onUnbind(Intent intent) {
+        Log.v(TAG, "onUnbind intent="+intent);
+        return super.onUnbind(intent);
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        Log.v(TAG, "onDestroy mRunning=" + mRunning + ", COUNT=" + COUNT);
+
+        // release listener and receiver
+        if (mSensor != null)
+            mSensor.unregisterListener(this);
+        if (mDateChangedReceiver != null)
+            unregisterReceiver(mDateChangedReceiver);
+        if (mLocalReceiver != null)
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalReceiver);
+    }
+
+    /**
+     * just in case that android os kill this service, just store current data to pref in advance.
+     */
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        setRunning(this, mRunning);
+        setCOUNT(this, COUNT);
+        setDISTANCE(this, DISTANCE);
+        setDATE(this, DATE);
+        Log.v(TAG, "onLowMemory mRunning=" + mRunning + ", COUNT=" + COUNT);
     }
 
     /**
@@ -200,21 +236,26 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 speed = Math.abs(x + y + z - lastX - lastY - lastZ) / gapTime * 10000;
                 //Log.v(TAG, "onSensorChanged speed=" + speed);
                 if (speed > SHAKE_THRESHOLD) {
-                    Intent i = new Intent(Const.ACTION_COUNT_NOTIFY);
                     COUNT++;
                     setCOUNT(WalkCheckerService.this, COUNT);
+                    // calcurate distance, need to change
+                    long distance = COUNT*58/100;
+                    setDISTANCE(WalkCheckerService.this, distance);
+                    setDATE(WalkCheckerService.this, DATE);
+                    Log.v(TAG, "onSensorChanged got a step! count=" + COUNT + ", DISTANCE="+DISTANCE+", mDisplayState=" + mDisplayState);
                     mVibe.vibrate(100);
-                    Log.v(TAG, "onSensorChanged got a step! count=" + COUNT + ", mDisplayState=" + mDisplayState);
 
                     // deliver data to console for display. ex) activity or mini view
                     if (mDisplayState == 1) {
-                        i.putExtra("count", COUNT + "");
+                        Intent i = new Intent(Const.ACTION_COUNT_NOTIFY);
+                        i.putExtra("count", COUNT);
+                        i.putExtra("distance", DISTANCE);
                         LocalBroadcastManager.getInstance(this).sendBroadcast(i);
                     } else if (mDisplayState == 2) {
                         TextView count = (TextView) mView.findViewById(R.id.mini_tv1);
                         count.setText(COUNT + "");
                         TextView addr = (TextView) mView.findViewById(R.id.mini_tv2);
-                        addr.setText(COUNT * 58 / 100 + "" + "m");
+                        addr.setText(DISTANCE + "m");
                     }
                 }
                 lastX = event.values[SensorManager.DATA_X];
@@ -228,24 +269,6 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
     }
 
-    @Override
-    public void onDestroy() {
-        super.onDestroy();
-        Log.v(TAG, "onDestroy mSensor=" + mSensor);
-
-        setCOUNT(this, COUNT);
-        setRunning(this, mRunning);
-        Log.v(TAG, "onDestroy mRunning=" + mRunning + ", COUNT=" + COUNT);
-
-        // release listener and receiver
-        if (mSensor != null)
-            mSensor.unregisterListener(this);
-        if (mDateChangedReceiver != null)
-            unregisterReceiver(mDateChangedReceiver);
-        if (mLocalReceiver != null)
-            LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalReceiver);
-    }
-
     /**
      * for drag and drop of mini view
      * @param v
@@ -254,24 +277,47 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
      */
     @Override
     public boolean onTouch(View v, MotionEvent event) {
+        boolean ret = false;
+
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 mTouchX = event.getRawX();
                 mTouchY = event.getRawY();
                 mViewX = mParams.x;
                 mViewY = mParams.y;
+                needToLaunchActivity = true;
+                ret = true;
                 break;
             case MotionEvent.ACTION_UP:
+                if(needToLaunchActivity){
+                    if (mDisplayState == 2) {
+                        /*Intent i = new Intent(getApplicationContext(), WalkCheckerActivity.class);
+                        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                        startActivity(i);*/
+                    }
+                }else{
+                    //mParams.alpha = 1f;
+                    //wm.updateViewLayout(mView, mParams);
+                }
+                ret = true;
                 break;
             case MotionEvent.ACTION_MOVE:
                 int x = (int) (event.getRawX() - mTouchX);
                 int y = (int) (event.getRawY() - mTouchY);
+                Log.v(TAG, "move dx="+x+", dy="+y);
+                if(x > 5 || y > 5){
+                    needToLaunchActivity = false;
+                }
                 mParams.x = mViewX + x;
                 mParams.y = mViewY + y;
+                //mParams.alpha = 0.5f;
                 wm.updateViewLayout(mView, mParams);
+                ret = true;
+                break;
+            default:
                 break;
         }
-        return true;
+        return ret;
     }
 
     /**
@@ -313,13 +359,12 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
             Log.v(TAG, "action=" + action);
 
             if (action.equals(Const.ACTION_ACTIVITY_ONRESUME)) { // activity launched
+                Log.v(TAG, "mDisplayState="+mDisplayState+", mRunning="+mRunning);
                 // remove mini view if exists
                 if (mDisplayState == 2) {
                     wm.removeView(mView);
                     stopForeground(true);
                 }
-                // init display for activity
-                initActivityDisplay();
                 if(mRunning){
                     startListeningAccelerometer();
                     startListeningGps();
@@ -337,7 +382,7 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
                 Date today = new Date();
                 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
                 String date = sdf.format(today);
-                setDATE(date);
+                setDATE(WalkCheckerService.this, date);
                 // start listening from accelerometer
                 startListeningAccelerometer();
                 // start listening from gps
@@ -427,7 +472,9 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         SharedPreferences pref = getSharedPreferences("myPref", MODE_PRIVATE);
         mRunning = pref.getBoolean("Running", false);
         COUNT = pref.getLong("count", 0);
-        Log.v(TAG, "restorePreviousData mRunning=" + mRunning + ", COUNT=" + COUNT);
+        DISTANCE = pref.getLong("distance", 0);
+        DATE = pref.getString("date", "");
+        Log.v(TAG, "restoreData mRunning=" + mRunning + ", COUNT=" + COUNT+", DISTANCE="+DISTANCE+", DATE="+DATE);
     }
 
     public void registerBroadcastReceivers() {
@@ -444,48 +491,30 @@ public class WalkCheckerService extends Service implements SensorEventListener, 
         registerReceiver(mDateChangedReceiver, globalFilter);
     }
 
-    private void initActivityDisplay() {
-        Intent i = new Intent(Const.ACTION_INIT_ACTIVITY);
-        i.putExtra("Running", mRunning);
-        i.putExtra("count", COUNT + "");
-        i.putExtra("addr", ADDR);
-        LocalBroadcastManager.getInstance(WalkCheckerService.this).sendBroadcast(i);
-    }
-
     private void initMiniViewDisplay() {
         LayoutInflater mInflater = (LayoutInflater) getSystemService(Context.LAYOUT_INFLATER_SERVICE);
         mView = mInflater.inflate(R.layout.mini, null);
         TextView count = (TextView) mView.findViewById(R.id.mini_tv1);
         count.setText(COUNT + "");
-        TextView addr = (TextView) mView.findViewById(R.id.mini_tv2);
-        addr.setText(COUNT * 58 / 100 + "" + "m");
+        TextView distance = (TextView) mView.findViewById(R.id.mini_tv2);
+        distance.setText(DISTANCE + "m");
         mView.setOnTouchListener(WalkCheckerService.this);
-        /*mView.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mDisplayState == 2) {
-                    Intent i = new Intent(getApplicationContext(), WalkCheckerActivity.class);
-                    startActivity(i);
-                }
-            }
-        });*/
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
         mParams = new WindowManager.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 , WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                 , PixelFormat.TRANSPARENT);
         wm.addView(mView, mParams);
         // keep it alive when low memory
-        startForeground(1, new Notification());
         NotificationManager nm = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         Notification notification = null;
-        notification = new Notification.Builder(getApplicationContext())
+        notification = new NotificationCompat.Builder(getApplicationContext())
                 .setContentTitle("")
                 .setContentText("")
                 .setSmallIcon(R.drawable.foot)
                 .build();
         nm.notify(1, notification);
         nm.cancel(1);
-
+        startForeground(0, notification);
     }
 
     private void startListeningAccelerometer() {

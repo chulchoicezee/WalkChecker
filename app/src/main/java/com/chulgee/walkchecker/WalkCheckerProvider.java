@@ -25,7 +25,6 @@ public class WalkCheckerProvider extends ContentProvider {
 
         // create only open helper, not real database to avoid unnecessary load at this time
         mDbHelper = new DbHelper(getContext(), DB_NAME, null, DB_VER);
-
         return true;
     }
 
